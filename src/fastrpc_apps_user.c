@@ -2434,9 +2434,9 @@ bail:
 }
 
 static int close_domain_session(int domain) {
-  QNode *pn = NULL, *pnn = NULL;
+  QNode *pn = NULL;
   char dlerrstr[255];
-  int dlerr = 0, nErr = AEE_SUCCESS;
+  int dlerr = 0, nErr = AEE_SUCCESS, mut_locked = 0;
   remote_handle64 proc_handle = 0;
 
   FARF(ALWAYS,
@@ -2450,35 +2450,50 @@ static int close_domain_session(int domain) {
     adsp_current_process_exit();
   }
   pthread_mutex_lock(&hlist[domain].lmut);
-  if (!QList_IsEmpty(&hlist[domain].nql)) {
-    QLIST_NEXTSAFE_FOR_ALL(&hlist[domain].nql, pn, pnn) {
-      struct handle_info *hi = STD_RECOVER_REC(struct handle_info, qn, pn);
-      VERIFYC(NULL != hi, AEE_EINVHANDLE);
-      pthread_mutex_unlock(&hlist[domain].lmut);
-      remote_handle_close(hi->remote);
-      pthread_mutex_lock(&hlist[domain].lmut);
-    }
+  mut_locked = 1;
+
+  while (!QList_IsEmpty(&hlist[domain].nql)) {
+    struct handle_info *hi;
+    pn = QList_Pop(&hlist[domain].nql);
+    hi = STD_RECOVER_REC(struct handle_info, qn, pn);
+    VERIFYC(NULL != hi, AEE_EINVHANDLE);
+    pthread_mutex_unlock(&hlist[domain].lmut);
+    mut_locked = 0;
+    remote_handle_close(hi->remote);
+    pthread_mutex_lock(&hlist[domain].lmut);
+    mut_locked = 1;
   }
-  if (!QList_IsEmpty(&hlist[domain].rql)) {
-    QLIST_NEXTSAFE_FOR_ALL(&hlist[domain].rql, pn, pnn) {
-      struct handle_info *hi = STD_RECOVER_REC(struct handle_info, qn, pn);
-      VERIFYC(NULL != hi, AEE_EINVHANDLE);
-      pthread_mutex_unlock(&hlist[domain].lmut);
-      close_reverse_handle(hi->local, dlerrstr, sizeof(dlerrstr), &dlerr);
-      pthread_mutex_lock(&hlist[domain].lmut);
-    }
+
+  while (!QList_IsEmpty(&hlist[domain].rql)) {
+    struct handle_info *hi;
+    pn = QList_Pop(&hlist[domain].rql);
+    hi = STD_RECOVER_REC(struct handle_info, qn, pn);
+    VERIFYC(NULL != hi, AEE_EINVHANDLE);
+    pthread_mutex_unlock(&hlist[domain].lmut);
+    mut_locked = 0;
+    close_reverse_handle(hi->local, dlerrstr, sizeof(dlerrstr), &dlerr);
+    pthread_mutex_lock(&hlist[domain].lmut);
+    mut_locked = 1;
   }
-  if (!QList_IsEmpty(&hlist[domain].ql)) {
-    QLIST_NEXTSAFE_FOR_ALL(&hlist[domain].ql, pn, pnn) {
-      struct handle_info *hi = STD_RECOVER_REC(struct handle_info, qn, pn);
-      VERIFYC(NULL != hi, AEE_EINVHANDLE);
-      pthread_mutex_unlock(&hlist[domain].lmut);
-      remote_handle64_close(hi->local);
-      pthread_mutex_lock(&hlist[domain].lmut);
-    }
+
+  while (!QList_IsEmpty(&hlist[domain].ql)) {
+    struct handle_info *hi;
+    pn = QList_Pop(&hlist[domain].ql);
+    hi = STD_RECOVER_REC(struct handle_info, qn, pn);
+    VERIFYC(NULL != hi, AEE_EINVHANDLE);
+    pthread_mutex_unlock(&hlist[domain].lmut);
+    mut_locked = 0;
+    remote_handle64_close(hi->local);
+    pthread_mutex_lock(&hlist[domain].lmut);
+    mut_locked = 1;
   }
   pthread_mutex_unlock(&hlist[domain].lmut);
+  mut_locked = 0;
 bail:
+  if (mut_locked) {
+    pthread_mutex_unlock(&hlist[domain].lmut);
+    mut_locked = 0;
+  }
   if (nErr != AEE_SUCCESS) {
     FARF(ERROR, "Error 0x%x: %s failed for domain %d (errno %s)", nErr,
          __func__, domain, strerror(errno));
