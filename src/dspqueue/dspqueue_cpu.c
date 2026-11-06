@@ -24,6 +24,7 @@
 #include "dspsignal.h"
 #include "fastrpc_apps_user.h"
 #include "fastrpc_internal.h"
+#include "fastrpc_domains.h"
 #include "fastrpc_mem.h"
 #include "fastrpc_context.h"
 #include "remote.h"
@@ -495,6 +496,8 @@ AEEResult dspqueue_create(int domain, uint32_t flags, uint32_t req_queue_size,
   VERIFYC(queue, AEE_EBADPARM);
   *queue = NULL;
   errno = 0;
+
+  domain = fastrpc_domain_to_slot(domain);
 
   if (domain == -1) {
     domain = get_current_domain();
